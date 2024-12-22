@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from PIL import Image
 
 import scipy.io
 import pandas as pd
@@ -16,22 +15,23 @@ from config import LMDB_PATH_MALE, LMDB_PATH_FEMALE, FAISS_PATH_MALE, FAISS_PATH
 from utils.face_embedding import preprocess, get_face_embedding
 
 
-async def get_best_images():
-    mat_data = scipy.io.loadmat(os.path.join(DATASET_PATH, 'imdb_crop/imdb.mat'))
-    dt = mat_data['imdb'][0, 0]
+async def get_best_images(): # получаем лучшие фотографии каждого человека
+    mat_data = scipy.io.loadmat(os.path.join(DATASET_PATH, 'imdb_crop/imdb.mat')) # загрузка базы данных
+    dt = mat_data['imdb'][0, 0]  # извлекаем данные:
     keys_s = ('gender', 'dob', 'photo_taken',
               'face_score', 'second_face_score', 'celeb_id')
     values = {k: dt[k].squeeze() for k in keys_s}
-    keys_n = ('full_path', 'name')
+    keys_n = ('full_path', 'name') # создаем пути к изображениям:
     for k in keys_n:
         values[k] = np.array([x if not x else x[0] for x in dt[k][0]])
+    # обработка местоположения лица
     values['face_location'] =\
         [tuple(x[0].tolist()) for x in dt['face_location'].squeeze()]
-    set_nrows = {len(v) for _, v in values.items()}
+    
+    set_nrows = {len(v) for _, v in values.items()} # убедимся, что все массивы имеют одну длину:
+    assert len(set_nrows) == 1 
 
-    assert len(set_nrows) == 1
-
-    df_values = pd.DataFrame(values)
+    df_values = pd.DataFrame(values) 
     matlab_origin = datetime(1, 1, 1)
     days_offset = timedelta(days=366)
 
@@ -44,10 +44,10 @@ async def get_best_images():
         except OverflowError:
             return pd.NaT
 
-    df_values['dob'] = df_values['dob'].apply(matlab_datenum_to_datetime)
+    df_values['dob'] = df_values['dob'].apply(matlab_datenum_to_datetime) # преобразуем даты в формат pandas, отбираем подходящие фото:
     filtered_df = df_values[(df_values['face_score'] > 0) & (df_values['second_face_score'].isna())]
 
-    best_images = (
+    best_images = ( # сортировка по счету лица и даты фото:
         filtered_df.sort_values(by=['face_score', 'photo_taken'], ascending=[False, False])
         .groupby('celeb_id')
         .first()
@@ -63,27 +63,76 @@ async def get_best_images():
     )
 
 
-async def process_image(key, path, name, lmdb_db, all_embeddings):
-    # YOUR_CODE_HERE
+async def process_image(key, path, name, lmdb_db, all_embeddings): # делает ембеддинг модели по ключу, пути, имени и датабазы
+    if not path.lower().endswith(('.png', '.jpg', '.jpeg')):
+        return
+
+    image_path = os.path.join(DATASET_PATH, 'imdb_crop', path) # получаем путь до фото
 
     try:
-        # YOUR_CODE_HERE
+        face = await preprocess(image_path)
+        embedding = await get_face_embedding(face) # получили эмбеддинг фото
+
+        with open(image_path, 'rb') as f:
+            photo_bytes = f.read() # прочитали фото в бинарном формате
+
+        data = { # словарь с нужными параметрами: имя, ембеддинги и фото
+            'name': name,
+            'embedding': embedding.tolist(),
+            'photo': photo_bytes,
+        }
+        await lmdb_db.write_entry(key, data) # записываем в датабазу 
+        all_embeddings.append((embedding, key)) # записываем в ембеддинги
     except Exception as e:
-        # YOUR_CODE_HERE
+        all_embeddings.append((np.zeros(512), key)) # very important!
+        print(f"Error processing {path}: {e}")
 
 
 async def build():
-    if not os.path.exists(DATASET_PATH):
+    print("\nBuild has been started")
+    if not os.path.exists(DATASET_PATH): # проверка есть ли файл DATASET_PATH
         raise FileNotFoundError(f"Celebrity dataset directory '{DATASET_PATH}' not found.")
-
-    if not os.path.exists(LMDB_PATH_FEMALE):
+    
+    if not os.path.exists(LMDB_PATH_FEMALE): # создает каталог, если его нет
         os.makedirs(LMDB_PATH_FEMALE)
     female_lmdb_db = CelebDatabase(LMDB_PATH_FEMALE)
-    if not os.path.exists(LMDB_PATH_MALE):
+    if not os.path.exists(LMDB_PATH_MALE): # создает каталог, если его нет
         os.makedirs(LMDB_PATH_MALE)
     male_lmdb_db = CelebDatabase(LMDB_PATH_MALE)
 
-    # YOUR_CODE_HERE
+    print("\nGetting best images...")
+    female_paths, female_names, male_paths, male_names = await get_best_images() # получает лучшие изображения
+    print("\nGot best images...")
+
+    female_embeddings = []
+    male_embeddings = []
+    tasks = [
+        process_image(key, female_paths[key], female_names[key], female_lmdb_db, female_embeddings)
+        for key in range(len(female_names))
+    ]
+    tasks += [
+        process_image(key, male_paths[key], male_names[key], male_lmdb_db, male_embeddings)
+        for key in range(len(male_names))
+    ]
+    await tqdm.gather(*tasks) # "параллельное" выполнение корутин для более эффективной работы
+    await female_lmdb_db.close() # закрывает файл
+    await male_lmdb_db.close() # закрывает файл
+
+    def index_build(embeddings, FAISS_PATH_GENDER):
+        dimension = embeddings[0][0].shape[0]
+        index = faiss.IndexFlatIP(dimension) # обучение модели
+        embeddings = [emb for emb, _ in sorted(embeddings, key=lambda x: x[1])] # получение эмбеддингов и сортировка по ключам 
+        fmap = np.array(embeddings) # numpy array эмбеддингов
+        index.add(fmap) # добавили эмбеддинги в index
+        faiss.write_index(index, FAISS_PATH_GENDER) # сохранение index по пути FAISS_PATH_GENDER
+
+    print("\nCreating FAISS index for female...")
+    index_build(female_embeddings, FAISS_PATH_FEMALE) # строим faiss для женщин
+    print(f"FAISS index for female saved to '{FAISS_PATH_FEMALE}'")
+
+    print("\nCreating FAISS index for male...")
+    index_build(male_embeddings, FAISS_PATH_MALE) # строим faiss для мужщин
+    print(f"FAISS index for male saved to '{FAISS_PATH_MALE}'")
 
 
 if __name__ == "__main__":

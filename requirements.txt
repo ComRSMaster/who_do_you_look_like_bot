@@ -9,3 +9,4 @@ aiogram
 opencv-python-headless
 kagglehub
 scipy
+pandas
