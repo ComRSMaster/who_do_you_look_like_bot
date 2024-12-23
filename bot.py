@@ -51,7 +51,7 @@ class _Loaded:
 Loaded = _Loaded()
 
 genders = ["Мужской", "Женский"]
-models = ["IMDB_WIKI", "NNDB_CELEBS (наша)"]
+models = ["IMDB_WIKI", "NNDB_CELEBS"]
 
 
 def topk_text(gender_id, k, model_id, photo_id):
