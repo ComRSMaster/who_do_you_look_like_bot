@@ -227,31 +227,33 @@ async def handle_photo(message: types.Message, state: FSMContext):
 
 async def launch(message: types.Message, gender_id, k, model_id, photo_id):
     try:
-        if Loaded.male_lmdb_db is None:
-            logging.info("Loading MALE LMDB database...")
-            Loaded.male_lmdb_db = CelebDatabase(LMDB_PATH_MALE)
+        if model_id == 0:
+            if gender_id == 0 and Loaded.male_lmdb_db is None:
+                logging.info("Loading MALE LMDB database...")
+                Loaded.male_lmdb_db = CelebDatabase(LMDB_PATH_MALE)
 
-            logging.info("Loading MALE FAISS index...")
-            Loaded.male_faiss_index = faiss.read_index(FAISS_PATH_MALE)
+                logging.info("Loading MALE FAISS index...")
+                Loaded.male_faiss_index = faiss.read_index(FAISS_PATH_MALE)
+            elif gender_id == 1 and Loaded.female_lmdb_db is None:
+                logging.info("Loading FEMALE LMDB database...")
+                Loaded.female_lmdb_db = CelebDatabase(LMDB_PATH_FEMALE)
 
-            logging.info("Loading FEMALE LMDB database...")
-            Loaded.female_lmdb_db = CelebDatabase(LMDB_PATH_FEMALE)
+                logging.info("Loading FEMALE FAISS index...")
+                Loaded.female_faiss_index = faiss.read_index(FAISS_PATH_FEMALE)
+        elif model_id == 1:
+            # NNDB
+            if gender_id == 0 and Loaded.nndb_male_lmdb_db is None:
+                logging.info("Loading NNDB MALE LMDB database...")
+                Loaded.nndb_male_lmdb_db = CelebDatabase(NNDB_LMDB_PATH_MALE)
 
-            logging.info("Loading FEMALE FAISS index...")
-            Loaded.female_faiss_index = faiss.read_index(FAISS_PATH_FEMALE)
+                logging.info("Loading NNDB MALE FAISS index...")
+                Loaded.nndb_male_faiss_index = faiss.read_index(NNDB_FAISS_PATH_MALE)
+            elif gender_id == 1 and Loaded.nndb_female_lmdb_db is None:
+                logging.info("Loading NNDB FEMALE LMDB database...")
+                Loaded.nndb_female_lmdb_db = CelebDatabase(NNDB_LMDB_PATH_FEMALE)
 
-            # # NNDB
-            # logging.info("Loading NNDB MALE LMDB database...")
-            # Loaded.nndb_male_lmdb_db = CelebDatabase(NNDB_LMDB_PATH_MALE)
-
-            # logging.info("Loading NNDB MALE FAISS index...")
-            # Loaded.nndb_male_faiss_index = faiss.read_index(NNDB_FAISS_PATH_MALE)
-
-            # logging.info("Loading NNDB FEMALE LMDB database...")
-            # Loaded.nndb_female_lmdb_db = CelebDatabase(NNDB_LMDB_PATH_FEMALE)
-
-            # logging.info("Loading NNDB FEMALE FAISS index...")
-            # Loaded.nndb_female_faiss_index = faiss.read_index(NNDB_FAISS_PATH_FEMALE)
+                logging.info("Loading NNDB FEMALE FAISS index...")
+                Loaded.nndb_female_faiss_index = faiss.read_index(NNDB_FAISS_PATH_FEMALE)
 
         logging.info(f"Received a photo from the user. photo_id: {photo_id}")
 
@@ -259,10 +261,16 @@ async def launch(message: types.Message, gender_id, k, model_id, photo_id):
         await message.answer_photo(photo_id, "Ваше фото:")
         face = await preprocess(photo_data)
         embedding = await get_face_embedding(face)
+        if model_id == 0:
+            lmdb_database = Loaded.male_faiss_index if gender_id == 0 else Loaded.female_faiss_index
+            faiss_index = Loaded.male_faiss_index if gender_id == 0 else Loaded.female_faiss_index
+        else:
+            lmdb_database = Loaded.nndb_male_faiss_index if gender_id == 0 else Loaded.nndb_female_faiss_index
+            faiss_index = Loaded.nndb_male_faiss_index if gender_id == 0 else Loaded.nndb_female_faiss_index
         results, distances = await find_closest(
             embedding,
-            (Loaded.male_lmdb_db if gender_id == 0 else Loaded.female_lmdb_db),
-            (Loaded.male_faiss_index if gender_id == 0 else Loaded.female_faiss_index),
+            lmdb_database,
+            faiss_index,
             k,
         )
 
@@ -322,7 +330,7 @@ async def log_message(message: types.Message):
 @dp.update.middleware()
 async def log_middleware(handler, event: types.Update, data):
     try:
-        if event.event_type == UpdateType.MESSAGE:
+        if event.message is not None:
             asyncio.create_task(log_message(event.message))
         return await handler(event, data)
     except Exception as e:
