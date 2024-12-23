@@ -10,3 +10,4 @@ opencv-python-headless
 kagglehub
 scipy
 pandas
+redis

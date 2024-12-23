@@ -87,8 +87,10 @@ async def process_image(key, path, name, lmdb_db, all_embeddings): # делае�
         all_embeddings.append((np.zeros(512), key)) # very important!
         print(f"Error processing {path}: {e}")
 
-
+cnt = 0
 async def build():
+    global cnt
+
     print("\nBuild has been started")
     if not os.path.exists(DATASET_PATH): # проверка есть ли файл DATASET_PATH
         raise FileNotFoundError(f"Celebrity dataset directory '{DATASET_PATH}' not found.")
@@ -106,11 +108,17 @@ async def build():
 
     female_embeddings = []
     male_embeddings = []
-    
+
     for key in range(len(female_names)):
+        cnt += 1
+        if cnt % 100 == 0:
+            print(cnt)
         await process_image(key, female_paths[key], female_names[key], female_lmdb_db, female_embeddings)
-    
+
     for key in range(len(male_names)):
+        cnt += 1
+        if cnt % 100 == 0:
+            print(cnt)
         await process_image(key, male_paths[key], male_names[key], male_lmdb_db, male_embeddings)
     # tasks = [
     #     process_image(key, female_paths[key], female_names[key], female_lmdb_db, female_embeddings)
@@ -120,7 +128,7 @@ async def build():
     #     process_image(key, male_paths[key], male_names[key], male_lmdb_db, male_embeddings)
     #     for key in range(len(male_names))
     # ]
-    await tqdm.gather(*tasks) # "параллельное" выполнение корутин для более эффективной работы
+    # await tqdm.gather(*tasks) # "параллельное" выполнение корутин для более эффективной работы
     await female_lmdb_db.close() # закрывает файл
     await male_lmdb_db.close() # закрывает файл
 

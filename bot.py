@@ -2,6 +2,8 @@ import asyncio
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.fsm.strategy import FSMStrategy
 from aiogram.filters import Command, CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
 from aiogram.types.message import ContentType
@@ -28,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(
     token=TELEGRAM_API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-dp = Dispatcher()
+dp = Dispatcher(storage=RedisStorage.from_url(REDIS_URL), fsm_strategy=FSMStrategy.CHAT)
 
 
 # loaded databases and indexes:
@@ -129,9 +131,9 @@ async def select_gender(call: types.CallbackQuery, state: FSMContext):
     gender_id = int(call.data[1:])
 
     data = await state.get_data()
-    old_gender_id = data.get("gender")
-    k = data.get("k")
-    model_id = data.get("model_id")
+    old_gender_id = data.get("gender", 0)
+    k = data.get("k", 5)
+    model_id = data.get("model_id", 1)
     photo_id = data.get("photo_id")
     if gender_id == old_gender_id:
         await call.answer("Пол не изменился")
@@ -150,9 +152,9 @@ async def select_k(call: types.CallbackQuery, state: FSMContext):
     k = int(call.data[1:])
 
     data = await state.get_data()
-    gender_id = data.get("gender")
-    old_k = data.get("k")
-    model_id = data.get("model_id")
+    gender_id = data.get("gender", 0)
+    old_k = data.get("k", 5)
+    model_id = data.get("model_id", 1)
     photo_id = data.get("photo_id")
     if old_k == k:
         await call.answer("Количество похожих не изменилось")
@@ -170,10 +172,10 @@ async def select_k(call: types.CallbackQuery, state: FSMContext):
 async def select_model(call: types.CallbackQuery, state: FSMContext):
     model_id = int(call.data[1:])
 
-    data = await state.get_data()
-    gender_id = data.get("gender",0)
-    k = data.get("k",5)
-    old_model_id = data.get("model_id",1)
+    data = await state.get_data()    
+    gender_id = data.get("gender", 0)
+    k = data.get("k", 5)
+    old_model_id = data.get("model_id", 1)
     photo_id = data.get("photo_id")
     if old_model_id == model_id:
         await call.answer("Модель не изменилась")
@@ -184,7 +186,7 @@ async def select_model(call: types.CallbackQuery, state: FSMContext):
         topk_text(gender_id, k, model_id, photo_id),
         reply_markup=topk_markup(gender_id, k, model_id, photo_id),
     )
-    await state.update_data({"k": k})
+    await state.update_data({"model_id": model_id})
 
 
 
@@ -195,6 +197,7 @@ async def inline_launch(call: types.CallbackQuery, state: FSMContext):
         message=call.message,
         gender_id=data["gender"],
         k=data["k"],
+        model_id=data["model_id"],
         photo_id=data["photo_id"],
     )
 
@@ -211,17 +214,18 @@ async def handle_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     gender_id = data.get("gender")
     k = data.get("k")
+    model_id = data.get("model_id")
     photo_id = message.photo[-1].file_id
     await state.update_data({"photo_id": photo_id})
 
-    if k is None or gender_id is None:
+    if k is None or gender_id is None or model_id is None:
         await start_command(message, state)
     else:
-        await launch(message, gender_id, k, photo_id)
-        await state.update_data({"photo_id": None})
+        await launch(message, gender_id, k, model_id, photo_id)
+        # await state.update_data({"photo_id": None})
 
 
-async def launch(message: types.Message, gender_id, k, photo_id):
+async def launch(message: types.Message, gender_id, k, model_id, photo_id):
     try:
         if Loaded.male_lmdb_db is None:
             logging.info("Loading MALE LMDB database...")
@@ -252,6 +256,7 @@ async def launch(message: types.Message, gender_id, k, photo_id):
         logging.info(f"Received a photo from the user. photo_id: {photo_id}")
 
         photo_data = await bot.download(photo_id)
+        await message.answer_photo(photo_id, "Ваше фото:")
         face = await preprocess(photo_data)
         embedding = await get_face_embedding(face)
         results, distances = await find_closest(
