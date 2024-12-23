@@ -13,7 +13,7 @@ import faiss
 from utils.database import CelebDatabase
 from config import LMDB_PATH_MALE, LMDB_PATH_FEMALE, FAISS_PATH_MALE, FAISS_PATH_FEMALE, DATASET_PATH
 from utils.face_embedding import preprocess, get_face_embedding
-
+import csv
 
 async def get_best_images(): # получаем лучшие фотографии каждого человека
     mat_data = scipy.io.loadmat(os.path.join(DATASET_PATH, 'imdb_crop/imdb.mat')) # загрузка базы данных
@@ -63,7 +63,44 @@ async def get_best_images(): # получаем лучшие фотографи�
     )
 
 
+async def get_imdb_images():
+    big_path = DATASET_PATH + "/out.csv"
+    female_paths = []
+    female_names = []
+    male_paths = []
+    male_names = []
+    with open(big_path, encoding='utf-8') as r_file:
+        file_reader = csv.reader(r_file, delimiter = ",")
+        count = 0
+        for row in file_reader:
+            if(count > 0):
+                name = row[9]
+                gender = row[2]
+                # path = DATASET_PATH + "/" + row[8]
+                path = row[8]
+                # print(name)
+                # print(gender)
+                # print(path)
+                # return
+                if(gender == 0.0):
+                    female_paths.append(path)
+                    female_names.append(name)
+                else:
+                    male_paths.append(path)
+                    male_names.append(name)
+            count += 1
+    return (
+        female_paths, female_names, male_paths, male_names
+    )
+
+
+cnt = 0
 async def process_image(key, path, name, lmdb_db, all_embeddings): # делает ембеддинг модели по ключу, пути, имени и датабазы
+    global cnt
+    cnt += 1
+    if cnt % 100 == 0:
+        print(cnt)
+
     if not path.lower().endswith(('.png', '.jpg', '.jpeg')):
         return
 
@@ -87,10 +124,7 @@ async def process_image(key, path, name, lmdb_db, all_embeddings): # делае�
         all_embeddings.append((np.zeros(512), key)) # very important!
         print(f"Error processing {path}: {e}")
 
-cnt = 0
 async def build():
-    global cnt
-
     print("\nBuild has been started")
     if not os.path.exists(DATASET_PATH): # проверка есть ли файл DATASET_PATH
         raise FileNotFoundError(f"Celebrity dataset directory '{DATASET_PATH}' not found.")
@@ -103,32 +137,21 @@ async def build():
     male_lmdb_db = CelebDatabase(LMDB_PATH_MALE)
 
     print("\nGetting best images...")
-    female_paths, female_names, male_paths, male_names = await get_best_images() # получает лучшие изображения
+    female_paths, female_names, male_paths, male_names = await get_imdb_images() # получает лучшие изображения
     print("\nGot best images...")
 
     female_embeddings = []
     male_embeddings = []
 
-    for key in range(len(female_names)):
-        cnt += 1
-        if cnt % 100 == 0:
-            print(cnt)
-        await process_image(key, female_paths[key], female_names[key], female_lmdb_db, female_embeddings)
-
-    for key in range(len(male_names)):
-        cnt += 1
-        if cnt % 100 == 0:
-            print(cnt)
-        await process_image(key, male_paths[key], male_names[key], male_lmdb_db, male_embeddings)
-    # tasks = [
-    #     process_image(key, female_paths[key], female_names[key], female_lmdb_db, female_embeddings)
-    #     for key in range(len(female_names))
-    # ]
-    # tasks += [
-    #     process_image(key, male_paths[key], male_names[key], male_lmdb_db, male_embeddings)
-    #     for key in range(len(male_names))
-    # ]
-    # await tqdm.gather(*tasks) # "параллельное" выполнение корутин для более эффективной работы
+    tasks = [
+        process_image(key, female_paths[key], female_names[key], female_lmdb_db, female_embeddings)
+        for key in range(len(female_names))
+    ]
+    tasks += [
+        process_image(key, male_paths[key], male_names[key], male_lmdb_db, male_embeddings)
+        for key in range(len(male_names))
+    ]
+    await tqdm.gather(*tasks) # "параллельное" выполнение корутин для более эффективной работы
     await female_lmdb_db.close() # закрывает файл
     await male_lmdb_db.close() # закрывает файл
 

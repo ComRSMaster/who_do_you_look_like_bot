@@ -3,4 +3,4 @@ __pycache__
 utils/__pycache__
 .env
 data/
-data2/
+nndb_data/

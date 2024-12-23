@@ -258,14 +258,14 @@ async def launch(message: types.Message, gender_id, k, model_id, photo_id):
         logging.info(f"Received a photo from the user. photo_id: {photo_id}")
 
         photo_data = await bot.download(photo_id)
-        await message.answer_photo(photo_id, "Ваше фото:")
+        # await message.answer_photo(photo_id, "Ваше фото:")
         face = await preprocess(photo_data)
         embedding = await get_face_embedding(face)
         if model_id == 0:
-            lmdb_database = Loaded.male_faiss_index if gender_id == 0 else Loaded.female_faiss_index
+            lmdb_database = Loaded.male_lmdb_db if gender_id == 0 else Loaded.female_lmdb_db
             faiss_index = Loaded.male_faiss_index if gender_id == 0 else Loaded.female_faiss_index
         else:
-            lmdb_database = Loaded.nndb_male_faiss_index if gender_id == 0 else Loaded.nndb_female_faiss_index
+            lmdb_database = Loaded.nndb_male_lmdb_db if gender_id == 0 else Loaded.nndb_female_lmdb_db
             faiss_index = Loaded.nndb_male_faiss_index if gender_id == 0 else Loaded.nndb_female_faiss_index
         results, distances = await find_closest(
             embedding,

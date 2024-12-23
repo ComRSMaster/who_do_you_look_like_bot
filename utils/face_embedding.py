@@ -9,7 +9,7 @@ mtcnn = MTCNN()
 # facenet_model = InceptionResnetV1(device=device)
 # state_dict = torch.load("data2/facenet_triplet_finetuned.pth", map_location=device)
 # filtered_state_dict = {k: v for k, v in state_dict.items() if not k.startswith("logits")}
-# facenet_model.load_state_dict(filtered_state_dict, strict=False)
+# facenet_model.load_state_dict(filtered_state_dict)
 # facenet_model.eval()
 
 facenet_model = InceptionResnetV1(pretrained="vggface2").eval()
